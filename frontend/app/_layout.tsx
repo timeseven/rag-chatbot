@@ -7,7 +7,8 @@ import * as React from 'react';
 import { Platform } from 'react-native';
 import { useColorScheme } from '~/lib/useColorScheme';
 import { NAV_THEME } from '~/lib/constants';
-
+import { ReactQueryProvider } from '~/context/ReactQueryContext';
+import Toast from 'react-native-toast-message';
 const LIGHT_THEME: Theme = {
 	...DefaultTheme,
 	colors: NAV_THEME.light,
@@ -47,11 +48,14 @@ export default function RootLayout() {
 	return (
 		<ThemeProvider value={isDarkColorScheme ? DARK_THEME : LIGHT_THEME}>
 			<StatusBar style={isDarkColorScheme ? 'light' : 'dark'} />
-			<Stack
-				screenOptions={{
-					headerShown: false,
-				}}
-			/>
+			<ReactQueryProvider>
+				<Stack
+					screenOptions={{
+						headerShown: false,
+					}}
+				/>
+				<Toast />
+			</ReactQueryProvider>
 		</ThemeProvider>
 	);
 }

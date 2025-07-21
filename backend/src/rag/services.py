@@ -37,7 +37,7 @@ class RagService(IRagService):
 
         if suffix == ".pdf":
             loader = PyPDFLoader(temp_file)
-        elif suffix in [".docx", "doc"]:
+        elif suffix in [".docx", ".doc"]:
             loader = Docx2txtLoader(temp_file)
         else:
             loader = TextLoader(temp_file)

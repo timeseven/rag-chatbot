@@ -34,7 +34,7 @@ export const ChatArea = ({
 				<View className='flex-row items-center justify-between'>
 					<View className='flex-row items-center'>
 						<FontAwesome5 name='robot' size={24} color='black' />
-						<Text className='ml-2 text-xl font-semibold'>Chat</Text>
+						<Text className='ml-2 text-xl font-semibold'>RAG Chatbot</Text>
 					</View>
 					<Badge variant='secondary'>
 						<Text className='text-xs'>{uploadedFiles.filter((f) => f.status === 'ready').length} documents ready</Text>

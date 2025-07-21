@@ -12,6 +12,8 @@ import { Message } from '~/components/Message';
 import { FileManagement } from '~/components/FileManagement';
 import { ChatArea } from '~/components/ChatArea';
 import { MobileTabNavigation } from '~/components/MobileTabNavigation';
+import { useAskQuestion, useUploadFile } from '~/features/rag/hooks/useRagApiHooks';
+import Toast from 'react-native-toast-message';
 
 interface Message {
 	id: string;
@@ -40,6 +42,8 @@ interface UploadedFile {
 	uploadedAt: Date;
 }
 
+const MAX_FILE_SIZE = 1 * 1024 * 1024;
+
 export default function RagChatbot() {
 	const isMobile = useIsMobile();
 	const [activeTab, setActiveTab] = useState('chat'); // For mobile tab switching
@@ -55,24 +59,10 @@ export default function RagChatbot() {
 	const [input, setInput] = useState('');
 	const [isLoading, setIsLoading] = useState(false);
 	const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
-
 	const scrollViewRef = useRef<ScrollView>(null);
 
-	// Mock RAG response data
-	const mockSources: Source[] = [
-		{
-			title: 'User Document Excerpt',
-			content: 'Based on your uploaded document content, here is the relevant information snippet...',
-			fileName: 'document.pdf',
-			score: 0.95,
-		},
-		{
-			title: 'Related Document Content',
-			content: 'Relevant information found in another document...',
-			fileName: 'guide.docx',
-			score: 0.87,
-		},
-	];
+	const uploadFile = useUploadFile();
+	const askQuestion = useAskQuestion();
 
 	const scrollToBottom = () => {
 		scrollViewRef.current?.scrollToEnd({ animated: true });
@@ -96,28 +86,32 @@ export default function RagChatbot() {
 		setInput('');
 		setIsLoading(true);
 
-		// Simulate API call delay
-		setTimeout(() => {
+		try {
 			const relatedFiles = uploadedFiles
 				.filter((file) => file.status === 'ready')
 				.slice(0, 2)
 				.map((file) => file.name);
-
+			const response = await askQuestion.mutateAsync(input);
 			const assistantMessage: Message = {
 				id: (Date.now() + 1).toString(),
-				content:
-					uploadedFiles.length > 0
-						? `Based on your uploaded documents, I'll answer your question about "${input}". I found relevant information in your documents that might be helpful.`
-						: `Regarding your question about "${input}", I'll answer based on my general knowledge. If you upload relevant documents, I can provide more accurate and specific answers.`,
+				content: response.answer,
 				role: 'assistant',
 				timestamp: new Date(),
-				sources: uploadedFiles.length > 0 ? mockSources : undefined,
 				relatedFiles: relatedFiles.length > 0 ? relatedFiles : undefined,
 			};
-
 			setMessages((prev) => [...prev, assistantMessage]);
 			setIsLoading(false);
-		}, 2000);
+		} catch (error) {
+			Toast.show({
+				type: 'error',
+				text1: 'Error',
+				text2: 'Failed to get an answer. Please try again later.',
+				position: 'top',
+				visibilityTime: 4000,
+			});
+			console.error('Error asking question:', error);
+			setIsLoading(false);
+		}
 	};
 
 	const handleFileUpload = async () => {
@@ -133,43 +127,59 @@ export default function RagChatbot() {
 			});
 
 			if (!result.canceled) {
-				result.assets.forEach((asset) => {
-					const fileId = Date.now().toString() + Math.random().toString(36).substr(2, 9);
-					const newFile: UploadedFile = {
-						id: fileId,
-						name: asset.name,
-						size: asset.size || 0,
-						type: asset.mimeType || '',
-						uri: asset.uri,
-						status: 'uploading',
-						progress: 0,
-						uploadedAt: new Date(),
-					};
+				const asset = result.assets[0];
 
-					setUploadedFiles((prev) => [...prev, newFile]);
+				if ((asset.size ?? 0) > MAX_FILE_SIZE) {
+					Toast.show({
+						type: 'error',
+						text1: 'File Too Large',
+						text2: 'Please select a file smaller than 1MB.',
+						position: 'top',
+						visibilityTime: 4000,
+					});
+					return;
+				}
 
-					// Simulate file upload and processing
-					let progress = 0;
-					const uploadInterval = setInterval(() => {
-						progress += Math.random() * 30;
-						if (progress >= 100) {
-							progress = 100;
-							clearInterval(uploadInterval);
+				const fileId = Date.now().toString() + Math.random().toString(36).substr(2, 9);
+				const newFile: UploadedFile = {
+					id: fileId,
+					name: asset.name,
+					size: asset.size || 0,
+					type: asset.mimeType || 'application/octet-stream',
+					uri: asset.uri,
+					status: 'uploading',
+					progress: 0,
+					uploadedAt: new Date(),
+				};
 
-							// Simulate processing stage
-							setUploadedFiles((prev) =>
-								prev.map((f) => (f.id === fileId ? { ...f, status: 'processing', progress: 100 } : f))
-							);
+				setUploadedFiles((prev) => [...prev, newFile]);
 
-							// Simulate processing completion
-							setTimeout(() => {
-								setUploadedFiles((prev) => prev.map((f) => (f.id === fileId ? { ...f, status: 'ready' } : f)));
-							}, 2000);
-						} else {
-							setUploadedFiles((prev) => prev.map((f) => (f.id === fileId ? { ...f, progress } : f)));
-						}
-					}, 200);
-				});
+				const formData = new FormData();
+
+				// eslint-disable-next-line @typescript-eslint/no-explicit-any
+				formData.append('file', asset.file as any);
+
+				try {
+					await uploadFile.mutateAsync({
+						formData,
+						onProgress: (progress) => {
+							if (progress < 100) {
+								setUploadedFiles((prev) =>
+									prev.map((f) => (f.id === fileId ? { ...f, progress, status: 'uploading' } : f))
+								);
+							} else {
+								setUploadedFiles((prev) =>
+									prev.map((f) => (f.id === fileId ? { ...f, status: 'processing', progress: 100 } : f))
+								);
+							}
+						},
+					});
+
+					setUploadedFiles((prev) => prev.map((f) => (f.id === fileId ? { ...f, status: 'ready' } : f)));
+				} catch (e) {
+					console.error('Upload failed:', e);
+					setUploadedFiles((prev) => prev.map((f) => (f.id === fileId ? { ...f, status: 'error' } : f)));
+				}
 			}
 		} catch (error) {
 			console.error('File upload error:', error);
